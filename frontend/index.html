@@ -1,0 +1,215 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Tienda online</title>
+<style>
+  :root { --bg:#f6f7f9; --card:#fff; --text:#1d2433; --muted:#5f6b7f; --line:#dde1e8; --accent:#1f5fbf; --err:#b3261e; --ok:#1b7a3d; }
+  @media (prefers-color-scheme: dark) { :root { --bg:#14171d; --card:#1d2129; --text:#e8ebf0; --muted:#9aa5b8; --line:#2f3644; --accent:#6ea2ff; --err:#ff8a80; --ok:#6fd28f; } }
+  * { box-sizing:border-box; }
+  body { margin:0; font:15px/1.5 system-ui, sans-serif; background:var(--bg); color:var(--text); }
+  header, main { max-width:960px; margin:0 auto; padding:16px; }
+  h1 { font-size:22px; margin:0 0 12px; }
+  h2 { font-size:17px; margin:0 0 10px; }
+  .card { background:var(--card); border:1px solid var(--line); border-radius:8px; padding:16px; margin-bottom:16px; }
+  .row { display:flex; flex-wrap:wrap; gap:8px; align-items:end; }
+  label { display:flex; flex-direction:column; font-size:13px; color:var(--muted); gap:2px; }
+  input, select, button { font:inherit; padding:6px 8px; border:1px solid var(--line); border-radius:6px; background:var(--card); color:var(--text); }
+  button { background:var(--accent); color:#fff; border-color:var(--accent); cursor:pointer; }
+  button.sec { background:transparent; color:var(--accent); }
+  button:focus-visible, input:focus-visible, select:focus-visible { outline:2px solid var(--accent); outline-offset:2px; }
+  .tabs { display:flex; gap:4px; margin-bottom:16px; }
+  .tabs button { background:transparent; color:var(--text); border-color:var(--line); }
+  .tabs button.on { background:var(--accent); color:#fff; border-color:var(--accent); }
+  .tabla { overflow-x:auto; }
+  table { border-collapse:collapse; width:100%; }
+  th, td { text-align:left; padding:6px 8px; border-bottom:1px solid var(--line); white-space:nowrap; }
+  th { font-weight:600; color:var(--muted); font-size:13px; }
+  #msg { min-height:24px; font-weight:600; }
+  #msg.err { color:var(--err); } #msg.ok { color:var(--ok); }
+  .vacio { color:var(--muted); }
+  [hidden] { display:none !important; }
+</style>
+</head>
+<body>
+<header>
+  <h1>Tienda online</h1>
+  <label>Direccion de la API
+    <input id="base" value="http://localhost:8000" size="32">
+  </label>
+  <p id="msg" role="status"></p>
+</header>
+
+<main>
+  <nav class="tabs">
+    <button data-tab="productos" class="on">Productos</button>
+    <button data-tab="usuarios">Usuarios</button>
+    <button data-tab="pedidos">Pedidos</button>
+  </nav>
+
+  <section id="productos">
+    <div class="card">
+      <h2>Crear producto</h2>
+      <form id="f-producto" class="row">
+        <label>Tipo
+          <select name="tipo"><option value="generico">Generico</option><option value="electronico">Electronico</option><option value="ropa">Ropa</option></select>
+        </label>
+        <label>Nombre <input name="nombre" required></label>
+        <label>Precio <input name="precio" type="number" step="0.01" min="0.01" required size="6"></label>
+        <label>Stock <input name="stock" type="number" min="0" required size="5"></label>
+        <label class="t-electronico" hidden>Meses garantia <input name="meses_garantia" type="number" min="0"></label>
+        <label class="t-ropa" hidden>Talla <input name="talla" size="5"></label>
+        <label class="t-ropa" hidden>Color <input name="color" size="8"></label>
+        <button>Crear producto</button>
+      </form>
+    </div>
+    <div class="card"><h2>Productos</h2><div class="tabla" id="t-productos"></div></div>
+  </section>
+
+  <section id="usuarios" hidden>
+    <div class="card">
+      <h2>Crear usuario</h2>
+      <form id="f-usuario" class="row">
+        <label>Tipo <select name="tipo"><option value="cliente">Cliente</option><option value="administrador">Administrador</option></select></label>
+        <label>Nombre <input name="nombre" required></label>
+        <label>Email <input name="email" type="email" required></label>
+        <label id="l-direccion">Direccion <input name="direccion"></label>
+        <button>Crear usuario</button>
+      </form>
+    </div>
+    <div class="card"><h2>Usuarios</h2><div class="tabla" id="t-usuarios"></div></div>
+  </section>
+
+  <section id="pedidos" hidden>
+    <div class="card">
+      <h2>Crear pedido</h2>
+      <form id="f-pedido" class="row">
+        <label>Cliente <select id="p-cliente" required></select></label>
+        <label>Producto <select id="p-producto" required></select></label>
+        <label>Cantidad <input id="p-cantidad" type="number" min="1" value="1" size="4"></label>
+        <button type="button" class="sec" id="p-anadir">Anadir linea</button>
+      </form>
+      <p id="p-lineas" class="vacio">Sin lineas todavia.</p>
+      <button id="p-crear">Crear pedido</button>
+    </div>
+    <div class="card">
+      <h2>Pedidos de un cliente</h2>
+      <div class="row">
+        <label>Cliente <select id="q-cliente"></select></label>
+        <button id="q-ver">Ver pedidos</button>
+      </div>
+      <div class="tabla" id="t-pedidos"></div>
+    </div>
+  </section>
+</main>
+
+<script>
+const $ = (s) => document.querySelector(s);
+const BASE = () => $("#base").value.replace(/\/$/, "");
+
+function aviso(texto, tipo) { const m = $("#msg"); m.textContent = texto; m.className = tipo || ""; }
+
+async function api(metodo, ruta, cuerpo) {
+  const opciones = { method: metodo, headers: {} };
+  if (cuerpo !== undefined) { opciones.headers["Content-Type"] = "application/json"; opciones.body = JSON.stringify(cuerpo); }
+  let resp;
+  try { resp = await fetch(BASE() + ruta, opciones); }
+  catch (e) { throw new Error("No se pudo conectar con " + BASE()); }
+  const datos = resp.status === 204 ? null : await resp.json();
+  if (!resp.ok) {
+    const d = datos && datos.detail;
+    throw new Error(Array.isArray(d) ? d.map(x => x.msg).join("; ") : (d || "Error " + resp.status));
+  }
+  return datos;
+}
+
+async function intentar(fn, okTexto) {
+  try { await fn(); if (okTexto) aviso(okTexto, "ok"); } catch (e) { aviso(e.message, "err"); }
+}
+
+function tabla(el, cols, filas, extra) {
+  if (!filas.length) { el.innerHTML = '<p class="vacio">No hay datos.</p>'; return; }
+  const t = document.createElement("table");
+  t.innerHTML = "<thead><tr>" + cols.map(c => `<th>${c[0]}</th>`).join("") + (extra ? "<th></th>" : "") + "</tr></thead>";
+  const tb = document.createElement("tbody");
+  filas.forEach(f => {
+    const tr = document.createElement("tr");
+    cols.forEach(c => { const td = document.createElement("td"); td.textContent = c[1](f) ?? ""; tr.appendChild(td); });
+    if (extra) { const td = document.createElement("td"); td.appendChild(extra(f)); tr.appendChild(td); }
+    tb.appendChild(tr);
+  });
+  t.appendChild(tb); el.replaceChildren(t);
+}
+
+let productos = [], usuarios = [], lineas = [];
+
+async function cargarProductos() {
+  productos = await api("GET", "/productos");
+  tabla($("#t-productos"),
+    [["Nombre", p => p.nombre], ["Tipo", p => p.tipo], ["Precio", p => p.precio.toFixed(2) + " EUR"], ["Stock", p => p.stock],
+     ["Detalles", p => p.tipo === "electronico" ? p.meses_garantia + " meses garantia" : p.tipo === "ropa" ? "Talla " + p.talla + ", " + p.color : ""]],
+    productos,
+    p => { const b = document.createElement("button"); b.className = "sec"; b.textContent = "Eliminar";
+      b.onclick = () => intentar(async () => { await api("DELETE", "/productos/" + p.id); await cargarProductos(); }, "Producto eliminado"); return b; });
+  const sel = $("#p-producto");
+  sel.innerHTML = productos.map(p => `<option value="${p.id}">${p.nombre} (stock ${p.stock})</option>`).join("");
+}
+
+async function cargarUsuarios() {
+  usuarios = await api("GET", "/usuarios");
+  tabla($("#t-usuarios"), [["Nombre", u => u.nombre], ["Email", u => u.email], ["Rol", u => u.es_admin ? "Administrador" : "Cliente"], ["ID", u => u.id]], usuarios);
+  const clientes = usuarios.filter(u => !u.es_admin).map(u => `<option value="${u.id}">${u.nombre}</option>`).join("");
+  $("#p-cliente").innerHTML = clientes; $("#q-cliente").innerHTML = clientes;
+}
+
+function pintarLineas() {
+  $("#p-lineas").textContent = lineas.length ? lineas.map(l => l.cantidad + " x " + l.nombre).join(", ") : "Sin lineas todavia.";
+}
+
+document.querySelectorAll(".tabs button").forEach(b => b.onclick = () => {
+  document.querySelectorAll(".tabs button").forEach(x => x.classList.toggle("on", x === b));
+  document.querySelectorAll("main > section").forEach(s => s.hidden = s.id !== b.dataset.tab);
+  refrescar();
+});
+
+$("#f-producto [name=tipo]").onchange = (e) => {
+  document.querySelectorAll(".t-electronico").forEach(l => l.hidden = e.target.value !== "electronico");
+  document.querySelectorAll(".t-ropa").forEach(l => l.hidden = e.target.value !== "ropa");
+};
+$("#f-usuario [name=tipo]").onchange = (e) => $("#l-direccion").hidden = e.target.value !== "cliente";
+
+$("#f-producto").onsubmit = (e) => { e.preventDefault(); const f = e.target;
+  const cuerpo = { tipo: f.tipo.value, nombre: f.nombre.value, precio: parseFloat(f.precio.value), stock: parseInt(f.stock.value) };
+  if (f.tipo.value === "electronico") cuerpo.meses_garantia = parseInt(f.meses_garantia.value);
+  if (f.tipo.value === "ropa") { cuerpo.talla = f.talla.value; cuerpo.color = f.color.value; }
+  intentar(async () => { await api("POST", "/productos", cuerpo); f.reset(); await cargarProductos(); }, "Producto creado"); };
+
+$("#f-usuario").onsubmit = (e) => { e.preventDefault(); const f = e.target;
+  const cuerpo = { tipo: f.tipo.value, nombre: f.nombre.value, email: f.email.value };
+  if (f.tipo.value === "cliente") cuerpo.direccion = f.direccion.value;
+  intentar(async () => { await api("POST", "/usuarios", cuerpo); f.reset(); await cargarUsuarios(); }, "Usuario creado"); };
+
+$("#p-anadir").onclick = () => {
+  const p = productos.find(x => x.id === $("#p-producto").value); if (!p) return;
+  lineas.push({ producto_id: p.id, nombre: p.nombre, cantidad: parseInt($("#p-cantidad").value) || 1 }); pintarLineas(); };
+
+$("#p-crear").onclick = () => intentar(async () => {
+  const cuerpo = { cliente_id: $("#p-cliente").value, items: lineas.map(l => ({ producto_id: l.producto_id, cantidad: l.cantidad })) };
+  const ped = await api("POST", "/pedidos", cuerpo);
+  lineas = []; pintarLineas(); await cargarProductos();
+  aviso("Pedido creado. Total: " + ped.total.toFixed(2) + " EUR", "ok");
+});
+
+$("#q-ver").onclick = () => intentar(async () => {
+  const peds = await api("GET", "/usuarios/" + $("#q-cliente").value + "/pedidos");
+  tabla($("#t-pedidos"), [["Fecha", p => new Date(p.fecha).toLocaleString()],
+    ["Productos", p => p.items.map(i => i.cantidad + " x " + i.nombre).join(", ")], ["Total", p => p.total.toFixed(2) + " EUR"]], peds);
+});
+
+function refrescar() { intentar(async () => { await Promise.all([cargarProductos(), cargarUsuarios()]); }); }
+$("#base").onchange = () => { aviso(""); refrescar(); };
+refrescar();
+</script>
+</body>
+</html>
